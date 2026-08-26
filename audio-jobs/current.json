@@ -1,0 +1,7 @@
+{
+  "id": "prizelens-video-2-amoe-limits",
+  "script": "audio-jobs/video2.txt",
+  "output": "prizelens-video-2-amoe-limits.wav",
+  "voice": "am_michael",
+  "speed": 1.05
+}
