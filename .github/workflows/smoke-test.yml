@@ -1,0 +1,46 @@
+name: PrizeLens Media Pipeline Smoke Test
+
+on:
+  push:
+    paths:
+      - "smoke-test/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: media-pipeline/requirements.txt
+      - name: Install Python dependencies
+        run: pip install -r media-pipeline/requirements.txt
+      - name: Create native 9x16 smoke-test slide
+        run: |
+          ffmpeg -y -f lavfi -i color=c=0x100520:s=1080x1920:d=1 -frames:v 1 smoke-test/slide.png
+      - name: Render TTS plus MP4
+        run: |
+          mkdir -p output
+          python media-pipeline/render.py --image smoke-test/slide.png --text-file smoke-test/script.txt --voice am_michael --speed 1.05 --output output/smoke-test.mp4
+      - name: Verify media
+        run: |
+          test -s output/smoke-test.mp4
+          test -s output/smoke-test.wav
+          ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration -of default=noprint_wrappers=1 output/smoke-test.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prizelens-media-smoke-test
+          path: |
+            output/smoke-test.mp4
+            output/smoke-test.wav
+          retention-days: 7
+          if-no-files-found: error
