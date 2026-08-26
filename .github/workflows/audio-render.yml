@@ -1,0 +1,55 @@
+name: PrizeLens Audio Renderer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "audio-jobs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: media-pipeline/requirements.txt
+      - name: Install Python dependencies
+        run: pip install -r media-pipeline/requirements.txt
+      - name: Resolve job and render
+        id: job
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          job=json.loads(Path('audio-jobs/current.json').read_text())
+          out=job.get('output','voice.wav')
+          cmd=['python','media-pipeline/render_audio.py','--text-file',job['script'],'--output',f'output/{out}','--voice',job.get('voice','am_michael'),'--speed',str(job.get('speed',1.05))]
+          subprocess.run(cmd,check=True)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              print(f"id={job['id']}",file=f)
+              print(f"output={out}",file=f)
+          PY
+      - name: Verify audio
+        run: |
+          test -s "output/${{ steps.job.outputs.output }}"
+          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1 "output/${{ steps.job.outputs.output }}"
+      - name: Upload audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ steps.job.outputs.id }}"
+          path: "output/${{ steps.job.outputs.output }}"
+          retention-days: 7
+          if-no-files-found: error
