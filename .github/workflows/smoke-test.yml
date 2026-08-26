@@ -1,20 +1,37 @@
-name: PrizeLens Media Pipeline Smoke Test
+name: PrizeLens Media Pipeline Worker
 
 on:
-  push:
-    branches:
-      - main
+  issues:
+    types: [opened, edited, reopened]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   render:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && startsWith(github.event.issue.title, '[render]')) ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '[render]'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Refresh latest main content
+        shell: bash
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
       - uses: actions/setup-python@v5
@@ -24,25 +41,51 @@ jobs:
           cache-dependency-path: media-pipeline/requirements.txt
       - name: Install Python dependencies
         run: pip install -r media-pipeline/requirements.txt
-      - name: Create native 9x16 smoke-test slide if missing
+      - name: Resolve current job
+        id: job
+        shell: bash
         run: |
-          if [ ! -f smoke-test/slide.png ]; then
-            ffmpeg -y -f lavfi -i color=c=0x100520:s=1080x1920:d=1 -frames:v 1 smoke-test/slide.png
-          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          job = json.loads(Path('media-jobs/current.json').read_text())
+          required = ['id','image','script','output']
+          missing = [k for k in required if not job.get(k)]
+          if missing:
+              raise SystemExit(f'Missing job fields: {missing}')
+          for key in ('image','script'):
+              if not Path(job[key]).is_file():
+                  raise SystemExit(f'Missing {key}: {job[key]}')
+          with open(Path(__import__('os').environ['GITHUB_OUTPUT']), 'a') as f:
+              for key in ('id','image','script','output'):
+                  print(f'{key}={job[key]}', file=f)
+              print(f"voice={job.get('voice','am_michael')}", file=f)
+              print(f"speed={job.get('speed',1.05)}", file=f)
+          PY
       - name: Render TTS plus MP4
+        shell: bash
         run: |
           mkdir -p output
-          python media-pipeline/render.py --image smoke-test/slide.png --text-file smoke-test/script.txt --voice am_michael --speed 1.05 --output output/smoke-test.mp4
+          python media-pipeline/render.py \
+            --image "${{ steps.job.outputs.image }}" \
+            --text-file "${{ steps.job.outputs.script }}" \
+            --voice "${{ steps.job.outputs.voice }}" \
+            --speed "${{ steps.job.outputs.speed }}" \
+            --output "output/${{ steps.job.outputs.output }}"
       - name: Verify media
+        shell: bash
         run: |
-          test -s output/smoke-test.mp4
-          test -s output/smoke-test.wav
-          ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration -of default=noprint_wrappers=1 output/smoke-test.mp4
-      - uses: actions/upload-artifact@v4
+          test -s "output/${{ steps.job.outputs.output }}"
+          WAV="output/${{ steps.job.outputs.output }}"
+          WAV="${WAV%.mp4}.wav"
+          test -s "$WAV"
+          ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration -of default=noprint_wrappers=1 "output/${{ steps.job.outputs.output }}"
+      - name: Upload final media
+        uses: actions/upload-artifact@v4
         with:
-          name: prizelens-media-smoke-test
+          name: "${{ steps.job.outputs.id }}"
           path: |
-            output/smoke-test.mp4
-            output/smoke-test.wav
+            output/${{ steps.job.outputs.output }}
+            output/*.wav
           retention-days: 7
           if-no-files-found: error
