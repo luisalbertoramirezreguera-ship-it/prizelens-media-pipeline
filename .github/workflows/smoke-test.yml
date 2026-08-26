@@ -1,25 +1,26 @@
 name: PrizeLens Media Pipeline Worker
 
 on:
-  issues:
-    types: [opened, edited, reopened]
-  issue_comment:
-    types: [created]
+  push:
+    branches:
+      - main
+    paths:
+      - "media-jobs/**"
+      - "smoke-test/**"
+      - "media-pipeline/**"
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
-  issues: read
+
+concurrency:
+  group: prizelens-media-worker
+  cancel-in-progress: false
 
 jobs:
   render:
-    if: >-
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issues' && startsWith(github.event.issue.title, '[render]')) ||
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '[render]'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -27,41 +28,51 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+
       - name: Refresh latest main content
         shell: bash
         run: |
           git fetch origin main
           git reset --hard origin/main
+
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: media-pipeline/requirements.txt
+
       - name: Install Python dependencies
         run: pip install -r media-pipeline/requirements.txt
+
       - name: Resolve current job
         id: job
         shell: bash
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
+
           job = json.loads(Path('media-jobs/current.json').read_text())
-          required = ['id','image','script','output']
+          required = ['id', 'image', 'script', 'output']
           missing = [k for k in required if not job.get(k)]
           if missing:
               raise SystemExit(f'Missing job fields: {missing}')
-          for key in ('image','script'):
+
+          for key in ('image', 'script'):
               if not Path(job[key]).is_file():
                   raise SystemExit(f'Missing {key}: {job[key]}')
-          with open(Path(__import__('os').environ['GITHUB_OUTPUT']), 'a') as f:
-              for key in ('id','image','script','output'):
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              for key in ('id', 'image', 'script', 'output'):
                   print(f'{key}={job[key]}', file=f)
-              print(f"voice={job.get('voice','am_michael')}", file=f)
-              print(f"speed={job.get('speed',1.05)}", file=f)
+              print(f"voice={job.get('voice', 'am_michael')}", file=f)
+              print(f"speed={job.get('speed', 1.05)}", file=f)
           PY
+
       - name: Render TTS plus MP4
         shell: bash
         run: |
@@ -72,14 +83,19 @@ jobs:
             --voice "${{ steps.job.outputs.voice }}" \
             --speed "${{ steps.job.outputs.speed }}" \
             --output "output/${{ steps.job.outputs.output }}"
+
       - name: Verify media
         shell: bash
         run: |
-          test -s "output/${{ steps.job.outputs.output }}"
-          WAV="output/${{ steps.job.outputs.output }}"
-          WAV="${WAV%.mp4}.wav"
+          MP4="output/${{ steps.job.outputs.output }}"
+          WAV="${MP4%.mp4}.wav"
+          test -s "$MP4"
           test -s "$WAV"
-          ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration -of default=noprint_wrappers=1 "output/${{ steps.job.outputs.output }}"
+          ffprobe -v error \
+            -show_entries stream=codec_name,width,height \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1 "$MP4"
+
       - name: Upload final media
         uses: actions/upload-artifact@v4
         with:
