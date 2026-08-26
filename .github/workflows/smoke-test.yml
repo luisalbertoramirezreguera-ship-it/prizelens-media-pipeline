@@ -2,8 +2,8 @@ name: PrizeLens Media Pipeline Smoke Test
 
 on:
   push:
-    paths:
-      - "smoke-test/**"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -24,9 +24,11 @@ jobs:
           cache-dependency-path: media-pipeline/requirements.txt
       - name: Install Python dependencies
         run: pip install -r media-pipeline/requirements.txt
-      - name: Create native 9x16 smoke-test slide
+      - name: Create native 9x16 smoke-test slide if missing
         run: |
-          ffmpeg -y -f lavfi -i color=c=0x100520:s=1080x1920:d=1 -frames:v 1 smoke-test/slide.png
+          if [ ! -f smoke-test/slide.png ]; then
+            ffmpeg -y -f lavfi -i color=c=0x100520:s=1080x1920:d=1 -frames:v 1 smoke-test/slide.png
+          fi
       - name: Render TTS plus MP4
         run: |
           mkdir -p output
