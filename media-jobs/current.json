@@ -1,8 +1,8 @@
 {
-  "id": "prizelens-worker-smoke-test",
+  "id": "prizelens-zero-click-validation",
   "image": "smoke-test/slide.png",
   "script": "smoke-test/script.txt",
   "voice": "am_michael",
   "speed": 1.05,
-  "output": "smoke-test.mp4"
+  "output": "zero-click-validation.mp4"
 }
