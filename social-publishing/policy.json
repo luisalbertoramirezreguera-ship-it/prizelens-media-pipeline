@@ -1,0 +1,6 @@
+{
+  "allowedNetworks": ["facebook", "instagram", "tiktok", "youtube"],
+  "blockedNetworks": ["twitter", "x"],
+  "stripPayloadKeys": ["twitterData", "xData"],
+  "policy": "PrizeLens does not publish to Twitter/X. Any Twitter/X network target or payload metadata must be removed before scheduling or updating content."
+}
